@@ -1,75 +1,160 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { router } from 'expo-router';
+import { useEffect, useState } from 'react';
+import { supabase } from '../../lib/supabase';
+import { format } from 'date-fns';
+import { es } from 'date-fns/locale';
+import { Ionicons } from '@expo/vector-icons';
 
-import { HelloWave } from '@/components/HelloWave';
-import ParallaxScrollView from '@/components/ParallaxScrollView';
-import { ThemedText } from '@/components/ThemedText';
-import { ThemedView } from '@/components/ThemedView';
+type Event = {
+  id: string;
+  title: string;
+  description: string;
+  date: string;
+  location: string;
+  created_at: string;
+  image_url?: string;
+  price?: number;
+  capacity?: number;
+  category?: string;
+};
 
 export default function HomeScreen() {
+  const [events, setEvents] = useState<Event[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchEvents();
+  }, []);
+
+  const fetchEvents = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('events')
+        .select('*')
+        .order('date', { ascending: true });
+
+      if (error) throw error;
+      setEvents(data || []);
+    } catch (error) {
+      console.error('Error fetching events:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const renderEventItem = ({ item }: { item: Event }) => (
+    <TouchableOpacity 
+      style={styles.eventCard}
+      onPress={() => router.push(`/event/${item.id}`)}
+    >
+      <Text style={styles.eventTitle}>{item.title}</Text>
+      <Text style={styles.eventDate}>
+        {format(new Date(item.date), "EEEE d 'de' MMMM 'de' yyyy", { locale: es })}
+      </Text>
+      <Text style={styles.eventLocation}>{item.location}</Text>
+      <Text style={styles.eventDescription} numberOfLines={2}>
+        {item.description}
+      </Text>
+    </TouchableOpacity>
+  );
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#FF3B30" />
+      </View>
+    );
+  }
+
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <Text style={styles.title}>Eventos</Text>
+      </View>
+
+      {events.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <Ionicons name="calendar-outline" size={64} color="#ccc" />
+          <Text style={styles.emptyText}>No hay eventos disponibles</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={events}
+          renderItem={renderEventItem}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.listContainer}
+          showsVerticalScrollIndicator={false}
         />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+      )}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
+  container: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
-    gap: 8,
+    backgroundColor: '#fff',
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+  header: {
+    padding: 20,
+    paddingTop: 60,
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+  },
+  listContainer: {
+    padding: 20,
+  },
+  eventCard: {
+    backgroundColor: '#f8f8f8',
+    padding: 15,
+    borderRadius: 10,
+    marginBottom: 15,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 3,
+  },
+  eventTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 5,
+  },
+  eventDate: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 5,
+  },
+  eventLocation: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 5,
+  },
+  eventDescription: {
+    fontSize: 14,
+    color: '#444',
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  emptyText: {
+    fontSize: 18,
+    color: '#666',
+    marginTop: 20,
   },
 });

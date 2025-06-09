@@ -1,0 +1,281 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+---
+description: Especificaciones del proyecto EventeAR (React Native + Expo) con backend en Supabase
+globs: ["**/*.js", "**/*.jsx", "**/*.ts", "**/*.tsx"]
+---
+
+# Especificaciones del Proyecto
+
+tene en cuenta siempre estar en la carpeta evencat/eventear
+
+## Contexto General
+
+La aplicación EventeAR busca centralizar la información de eventos culturales, deportivos y sociales en Catamarca, ofreciendo a usuarios finales un feed cronológico sin algoritmos y a organizadores una manera sencilla de publicar eventos. El backend se construirá con Supabase, usando Supabase Auth para la autenticación y gestión de roles.
+
+> EventeAR: Una aplicación web progresiva (PWA) pensada para facilitar el acceso rápido, relevante y personalizado a eventos culturales, musicales, deportivos y sociales.”
+
+---
+
+## Roles de Usuario
+
+1. **Usuario Común**  
+   - Se registra mediante Supabase Auth.  
+   - Al registrarse, debe elegir si quiere ser:  
+     - **Asistente**: Solo consulta y guarda eventos en favoritos.  
+     - **Organizador**: Puede crear y editar eventos (previa validación de su rol).  
+   - Puede configurar preferencias de interés (categorías, ubicación, etc.).  
+   - Puede marcar eventos como “Me interesa” o “Asistiré” para guardarlos en favoritos y recibir notificaciones.
+
+2. **Organizador**  
+   - Además de todo lo anterior, puede:  
+     - Acceder a un panel de gestión de eventos.  
+     - Crear, editar y eliminar eventos propios (carga de datos básicos: título, descripción, fecha, ubicación, imagen).  
+     - Ver métricas básicas de su evento (número de “Me interesa” y asistentes).  
+
+Las autorizaciones (“policies”) se implementarán con Supabase Row Level Security (RLS), diferenciando entre usuarios con rol `user` y usuarios con rol `organizer`.
+
+---
+
+## Backend (Supabase)
+
+### 1. Autenticación y Roles
+- Se utiliza **Supabase Auth** para:  
+  - Registro y login de usuarios (email/contraseña).  
+  - Verificación de correo electrónico.  
+  - Gestión de restablecimiento de contraseña.  
+- Al registrarse, el usuario envía un campo adicional (`role`) que puede ser `"user"` o `"organizer"`.  
+- Las reglas RLS en la tabla `profiles` permitirán que cada usuario solo modifique su propio perfil, y la tabla `events` validará que solo organizadores creen/editen sus eventos.
+
+### 2. Tablas Principales
+
+1. **profiles**  
+   - `id: uuid` (PK, igual al UID de Supabase Auth)  
+   - `name: text`  
+   - `email: text`  
+   - `role: text` (`"user" | "organizer"`)  
+   - `interests: text[]` (categorías seleccionadas en el onboarding)  
+   - `created_at: timestamp`  
+
+2. **events**  
+   - `id: uuid` (PK)  
+   - `organizer_id: uuid` (FK → profiles.id)  
+   - `title: text`  
+   - `description: text`  
+   - `category: text`  
+   - `location: text` (puede incluir coordenadas)  
+   - `start_time: timestamp`  
+   - `end_time: timestamp`  
+   - `image_url: text`  
+   - `created_at: timestamp`  
+   - `status: text` (`"draft" | "published"`)  
+
+3. **favorites**  
+   - `id: uuid` (PK)  
+   - `user_id: uuid` (FK → profiles.id)  
+   - `event_id: uuid` (FK → events.id)  
+   - `created_at: timestamp`  
+
+4. **subscriptions** (para notificaciones programadas)  
+   - `id: uuid` (PK)  
+   - `user_id: uuid` (FK → profiles.id)  
+   - `event_id: uuid` (FK → events.id)  
+   - `notification_type: text` (`"reminder" | "preventa" | "last_chance"`)  
+   - `scheduled_at: timestamp`  
+
+5. **notifications** (historial de notificaciones enviadas)  
+   - `id: uuid` (PK)  
+   - `user_id: uuid` (FK → profiles.id)  
+   - `event_id: uuid` (FK → events.id)  
+   - `type: text`  
+   - `sent_at: timestamp`  
+
+---
+
+## Políticas RLS (Row Level Security)
+
+- **profiles**:  
+  - Solo el dueño (`auth.uid() = profiles.id`) puede leer y actualizar su fila.  
+  - Lectura pública del nombre y rol (para mostrar al público quién es el organizador).  
+
+- **events**:  
+  - Lectura pública de todos los eventos con `status = 'published'`.  
+  - Solo el organizador (donde `auth.uid() = events.organizer_id`) puede crear, actualizar o eliminar su evento.  
+  - Los usuarios con rol `user` no pueden modificar `events`.  
+
+- **favorites** / **subscriptions** / **notifications**:  
+  - Solo el usuario propietario (`auth.uid() = user_id`) puede leer, crear o borrar sus filas.  
+
+---
+
+## Vistas (Pantallas) en la App Expo (React Native)
+
+### 1. Pantalla de Onboarding / Registro
+
+- **Objetivo**:  
+  - Identificar rol (Asistente u Organizador).  
+  - Configurar categorías de interés iniciales.  
+- **Componentes clave**:  
+  - Selección de rol (switch o botones).  
+  - Formulario básico (nombre, email, contraseña).  
+  - Checklist de categorías de interés (por ejemplo: “Conciertos”, “Teatro”, “Deportes”, “Feria”, etc.).  
+- **Flujo**:  
+  1. Usuario ingresa datos → se crea en Supabase Auth → se crea registro en `profiles` con `role` y `interests`.  
+  2. Si rol = `organizer`, habilitar botón para “Ir al Panel de Organizador”.  
+
+### 2. Pantalla de Inicio (Feed Cronológico / “Home”)
+
+- **Objetivo**:  
+  - Mostrar lista de eventos ordenados por `start_time` ascendente (sin algoritmos), filtrados por cercanía e intereses.  
+- **Componentes clave**:  
+  - Barra superior con logotipo y acceso a “Mi Perfil”.  
+  - Lista de cards de eventos: cada card muestra imagen, título, fecha, ubicación y botón “Me interesa” / “Asistiré”.  
+  - Filtros rápidos (iconos) para categoría, fecha, precio y ubicación.  
+- **Back-end**:  
+  - Endpoint en Supabase que consulte `events` donde `status = 'published'` y aplique filtros según `profiles.interests` y geolocalización del usuario.  
+  - Soporte de paginación (limit + offset) para carga incremental.  
+
+### 3. Pantalla de Detalle de Evento
+
+- **Objetivo**:  
+  - Mostrar toda la información del evento seleccionado.  
+  - Permitir “Me interesa” / “Asistiré” y “Compartir” (WhatsApp, redes, etc.).  
+- **Componentes clave**:  
+  - Imagen de portada, título, descripción completa.  
+  - Fecha y hora (`start_time`, `end_time`).  
+  - Ubicación con botón para abrir mapa (Google Maps / Apple Maps).  
+  - Sección de “Organizador” con nombre y acceso a perfil del organizador.  
+  - Botón para suscribirse a notificaciones (recordatorio, preventa, última oportunidad).  
+- **Back-end**:  
+  - Lectura de `events` por `id`.  
+  - Creación de fila en `favorites` o `subscriptions` si el usuario pulsa.  
+  - Lógica para programar notificaciones push.  
+
+### 4. Pantalla de “Mi Perfil”
+
+- **Objetivo**:  
+  - Mostrar datos del usuario (nombre, correo, rol).  
+  - Permitir editar “intereses” y contraseña.  
+  - Acceso a “Favoritos”, “Subscripciones”, “Notificaciones Recibidas”.  
+  - Si el rol = `organizer`: mostrar botón “Organizar Evento” y sección “Mis Eventos”.  
+- **Componentes clave**:  
+  - Avatar / foto de perfil (opcional).  
+  - Listado de categorías seleccionadas.  
+  - Sección “Favoritos”: lista de eventos guardados.  
+  - Sección “Subscripciones”: recordatorios programados.  
+  - Sección “Notificaciones”: historial de notificaciones push recibidas.  
+  - Botones “Cerrar Sesión” y “Eliminar Cuenta” (con confirmación).  
+
+### 5. Pantalla de Búsqueda
+
+- **Objetivo**:  
+  - Permitir al usuario buscar eventos por nombre, categoría o ubicación.  
+- **Componentes clave**:  
+  - Barra de búsqueda en la parte superior.  
+  - Filtros desplegables: categoría, fecha, precio, proximidad (radio).  
+  - Resultados en lista o grilla de cards similares al feed.  
+- **Back-end**:  
+  - Endpoint en Supabase con búsquedas full-text (fts) sobre `events.title` y `events.description`.  
+  - Aplicar filtros combinados en la consulta.  
+
+### 6. Pantalla de “Descubrir”
+
+- **Objetivo**:  
+  - Mostrar secciones “Nuevos Eventos”, “Más Cerca / Mejor Valorados” y “Programados sin Fecha Exacta”.  
+- **Componentes clave**:  
+  - Tabs o botones para cambiar entre las tres categorías.  
+  - Lista de eventos según cada sección (ordenados por “created_at” o “proximidad”).  
+- **Back-end**:  
+  - Varias consultas a Supabase para cada estado:  
+    - “Nuevos Eventos”: `ORDER BY created_at DESC LIMIT 20`.  
+    - “Más Cerca / Mejor Valorados”: filtrar por distancia y rating.  
+    - “Sin Fecha Exacta”: eventos con `start_time IS NULL` o con fecha futura aún sin definir.  
+
+### 7. Panel de Organizador (Solo si rol = “organizer”)
+
+- **Objetivo**:  
+  - Permitir al organizador crear, editar y eliminar sus eventos.  
+- **Componentes clave**:  
+  - Lista de “Mis Eventos”: cada card muestra título, fecha, estado (`draft`/`published`), y botones “Editar”/“Eliminar”.  
+  - Formulario de creación/edición:  
+    - Campos: título, descripción, categoría, fecha/hora, ubicación (con picker de mapa), imagen (upload a Supabase Storage).  
+    - Botón “Guardar Borrador” y “Publicar” (cambia `status`).  
+  - Vista de métricas básicas: número de usuarios que marcaron “Me interesa” y asistentes confirmados.  
+- **Back-end**:  
+  - CRUD en tabla `events` con RLS para que cada organizador solo pueda manipular sus propios eventos.  
+  - Carga de imágenes al bucket de Supabase Storage y obtención de URL.  
+  - Cálculo de métricas mediante conteo de filas en `favorites` y en suscripciones activas (`subscriptions`).  
+
+---
+
+## Notificaciones Push y Programación
+
+1. **Tipos de Notificaciones (MVP)**  
+   - **Recordatorio**: Enviado X horas antes de `start_time`.  
+   - **Preventa**: Si se habilita preventa, notificar cuando se abra la preventa (campo adicional en `events`).  
+   - **Última Oportunidad**: Cuando queden pocas entradas (< 10% de capacidad o 48h antes).  
+
+2. **Funcionamiento**  
+   - Al suscribirse a un evento, se crea una fila en `subscriptions` con el tipo deseado y `scheduled_at`.  
+   - Un “cron job” (por ejemplo, una función serverless en Supabase Edge Functions) verifica las filas próximas a `scheduled_at` y envía notificaciones push (usando Expo Push) y registra en `notifications`.  
+
+---
+
+## Diseño de Base de Datos Inicial (MVP)
+
+```sql
+-- Tabla profiles
+create table profiles (
+  id uuid primary key references auth.users(id),
+  name text not null,
+  email text not null unique,
+  role text check (role in ('user','organizer')),
+  interests text[] not null,
+  created_at timestamp default now()
+);
+
+-- Tabla events
+create table events (
+  id uuid primary key default uuid_generate_v4(),
+  organizer_id uuid references profiles(id),
+  title text not null,
+  description text,
+  category text not null,
+  location text,
+  start_time timestamp,
+  end_time timestamp,
+  image_url text,
+  status text check (status in ('draft','published')) default 'draft',
+  created_at timestamp default now()
+);
+
+-- Tabla favorites
+create table favorites (
+  id uuid primary key default uuid_generate_v4(),
+  user_id uuid references profiles(id),
+  event_id uuid references events(id),
+  created_at timestamp default now()
+);
+
+-- Tabla subscriptions
+create table subscriptions (
+  id uuid primary key default uuid_generate_v4(),
+  user_id uuid references profiles(id),
+  event_id uuid references events(id),
+  notification_type text check (notification_type in ('reminder','preventa','last_chance')),
+  scheduled_at timestamp,
+  created_at timestamp default now()
+);
+
+-- Tabla notifications (historial)
+create table notifications (
+  id uuid primary key default uuid_generate_v4(),
+  user_id uuid references profiles(id),
+  event_id uuid references events(id),
+  type text,
+  sent_at timestamp default now()
+);
+
